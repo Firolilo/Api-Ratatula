@@ -257,10 +257,20 @@ const resolvers = {
 
         nuevaPromocion: async (_, { input }) => {
             try {
+                const productosIds = input.productos.map((producto) => producto.idProducto);
+                const productosDuplicados = productosIds.filter((id, index) => productosIds.indexOf(id) !== index);
+
+                if (productosDuplicados.length > 0) {
+                    throw new Error(
+                        `La promoción contiene productos duplicados. Los IDs duplicados son: ${productosDuplicados.join(", ")}`
+                    );
+                }
+
                 const promocion = new Promocion(input);
                 return await promocion.save();
             } catch (error) {
-                throw new Error('Error al crear una nueva promoción.');
+                console.error("Error al crear promoción:", error.message);
+                throw new Error(`Error al crear una nueva promoción: ${error.message}`);
             }
         },
         eliminarPromocion: async (_, { id }) => {
@@ -279,11 +289,32 @@ const resolvers = {
 
         nuevoPedido: async (_, { input }) => {
             try {
+                for (const productoPedido of input.productos) {
+                    const producto = await Producto.findById(productoPedido.idProducto);
+                    if (!producto) {
+                        throw new Error(`Producto con ID ${productoPedido.idProducto} no encontrado.`);
+                    }
+
+                    if (productoPedido.cantidad > producto.stock) {
+                        throw new Error(
+                            `Stock insuficiente para el producto ${producto.nombre}. Disponible: ${producto.stock}, Requerido: ${productoPedido.cantidad}.`
+                        );
+                    }
+                }
+
                 const pedido = new Pedido(input);
-                return await pedido.save();
+                const nuevoPedido = await pedido.save();
+
+                for (const productoPedido of input.productos) {
+                    await Producto.findByIdAndUpdate(productoPedido.idProducto, {
+                        $inc: { stock: -productoPedido.cantidad },
+                    });
+                }
+
+                return nuevoPedido;
             } catch (error) {
                 console.error("Error al crear pedido:", error.message);
-                throw new Error("Error al crear un nuevo pedido.");
+                throw new Error(error.message || "Error al crear un nuevo pedido.");
             }
         },
         actualizarEstadoPedido: async (_, { id, estado }) => {
@@ -297,6 +328,34 @@ const resolvers = {
                 return await pedido.save();
             } catch (error) {
                 throw new Error(error.message || 'Error al actualizar el estado del pedido.');
+            }
+        },
+        actualizarEstadoVentaPedido: async (_, { id, estadoVenta }) => {
+            try {
+                const pedido = await Pedido.findById(id);
+                if (!pedido) {
+                    throw new Error(`Pedido con ID ${id} no encontrado.`);
+                }
+
+                if (estadoVenta === "fallido" && pedido.estadoVenta !== "fallido") {
+
+                    for (const productoPedido of pedido.productos) {
+                        const producto = await Producto.findById(productoPedido.idProducto);
+                        if (!producto) {
+                            throw new Error(`Producto con ID ${productoPedido.idProducto} no encontrado.`);
+                        }
+                        await Producto.findByIdAndUpdate(
+                            productoPedido.idProducto,
+                            { $inc: { stock: productoPedido.cantidad } },
+                            { new: true }
+                        );
+                    }
+                }
+                pedido.estadoVenta = estadoVenta;
+                return await pedido.save();
+            } catch (error) {
+                console.error("Error al actualizar estadoVenta del pedido:", error.message);
+                throw new Error(error.message || "Error al actualizar estadoVenta del pedido.");
             }
         },
         eliminarPedido: async (_, { id }) => {
@@ -349,6 +408,160 @@ const resolvers = {
             } catch (error) {
                 console.error("Error al crear reporte:", error.message);
                 throw new Error("Error al crear un nuevo reporte.");
+            }
+        },
+
+        agregarProductoACarrito: async (_, { idUsuario, producto }) => {
+            try {
+                const carrito = await Carrito.findOne({ idUsuario });
+
+                if (!carrito) {
+                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                }
+
+                const { idProducto, cantidad } = producto;
+
+                const productoDB = await Producto.findById(idProducto);
+                if (!productoDB) {
+                    throw new Error(`Producto con ID ${idProducto} no encontrado`);
+                }
+
+                const productoExistente = carrito.productos.find(p => p.idProducto.toString() === idProducto);
+                const cantidadActual = productoExistente ? productoExistente.cantidad : 0;
+
+                if (cantidadActual + cantidad > productoDB.stock) {
+                    throw new Error(
+                        `No se puede añadir el producto al carrito. Stock insuficiente. Stock disponible: ${productoDB.stock}, solicitado: ${cantidadActual + cantidad}`
+                    );
+                }
+
+                if (productoExistente) {
+                    productoExistente.cantidad += cantidad;
+                } else {
+                    carrito.productos.push({ idProducto, cantidad });
+                }
+
+                carrito.total += productoDB.precio * cantidad;
+                carrito.fechaActualizacion = new Date();
+
+                return await carrito.save();
+            } catch (error) {
+                throw new Error(`Error al agregar producto al carrito: ${error.message}`);
+            }
+        },
+
+        agregarPromoACarrito: async (_, { idUsuario, producto }) => {
+            try {
+                const carrito = await Carrito.findOne({ idUsuario });
+
+                if (!carrito) {
+                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                }
+
+                const { idPromo, cantidad } = producto;
+
+                const promoDB = await Promocion.findById(idPromo);
+                if (!promoDB) {
+                    throw new Error(`Promoción con ID ${idPromo} no encontrada`);
+                }
+
+                const promoExistente = carrito.promociones.find(p => p.idPromo.toString() === idPromo);
+                const cantidadActual = promoExistente ? promoExistente.cantidad : 0;
+
+                for (const productoPromo of promoDB.productos) {
+                    const productoDB = await Producto.findById(productoPromo.idProducto);
+                    const cantidadTotal = (cantidadActual + cantidad) * productoPromo.cantidad;
+
+                    if (productoDB.stock < cantidadTotal) {
+                        throw new Error(
+                            `No se puede añadir la promoción al carrito. Stock insuficiente para el producto ${productoDB.nombre}. ` +
+                            `Stock disponible: ${productoDB.stock}, solicitado: ${cantidadTotal}`
+                        );
+                    }
+                }
+
+                if (promoExistente) {
+                    promoExistente.cantidad += cantidad;
+                } else {
+                    carrito.promociones.push({ idPromo, cantidad });
+                }
+
+                carrito.total += promoDB.precioPromo * cantidad;
+                carrito.fechaActualizacion = new Date();
+
+                return await carrito.save();
+            } catch (error) {
+                throw new Error(`Error al agregar promoción al carrito: ${error.message}`);
+            }
+        },
+        eliminarProductoDeCarrito: async (_, { idUsuario, idProducto }) => {
+            try {
+                const carrito = await Carrito.findOne({ idUsuario });
+
+                if (!carrito) {
+                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                }
+
+                const producto = carrito.productos.find(p => p.idProducto.toString() === idProducto);
+                if (!producto) {
+                    throw new Error(`Producto con ID ${idProducto} no encontrado en el carrito`);
+                }
+
+                const productoDB = await Producto.findById(idProducto);
+                if (productoDB) {
+                    carrito.total -= productoDB.precio * producto.cantidad;
+                }
+
+                carrito.productos = carrito.productos.filter(p => p.idProducto.toString() !== idProducto);
+                carrito.fechaActualizacion = new Date();
+
+                return await carrito.save();
+            } catch (error) {
+                throw new Error(`Error al eliminar producto del carrito: ${error.message}`);
+            }
+        },
+        eliminarPromoDeCarrito: async (_, { idUsuario, idPromo }) => {
+            try {
+                const carrito = await Carrito.findOne({ idUsuario });
+
+                if (!carrito) {
+                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                }
+
+                const promo = carrito.promociones.find(p => p.idPromo.toString() === idPromo);
+                if (!promo) {
+                    throw new Error(`Promoción con ID ${idPromo} no encontrada en el carrito`);
+                }
+
+                const promoDB = await Promocion.findById(idPromo);
+                if (promoDB) {
+                    carrito.total -= promoDB.precioPromo * promo.cantidad;
+                }
+
+                carrito.promociones = carrito.promociones.filter(p => p.idPromo.toString() !== idPromo);
+                carrito.fechaActualizacion = new Date();
+
+                return await carrito.save();
+            } catch (error) {
+                throw new Error(`Error al eliminar promoción del carrito: ${error.message}`);
+            }
+        },
+        vaciarCarrito: async (_, { idUsuario }) => {
+            try {
+                const carrito = await Carrito.findOne({ idUsuario });
+
+                if (!carrito) {
+                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                }
+
+                carrito.productos = [];
+                carrito.promociones = [];
+                carrito.total = 0;
+                carrito.fechaActualizacion = new Date();
+
+                return await carrito.save();
+            } catch (error) {
+                throw new Error(`Error al vaciar el carrito: ${error.message}`);
             }
         }
     },

@@ -186,6 +186,7 @@ input PedidoInput {
     idCliente: ID!
     idLocal: ID!
     productos: [ProductoEnPedidoInput!]!
+    estadoVenta: String
 }
 
 input ProductoEnPedidoInput {
@@ -205,6 +206,14 @@ input ReporteInput {
     fechaFin: String!
 }
 
+input ProductoEnCarritoInput {
+    idProducto: ID!
+    cantidad: Int!
+}
+input PromoEnCarritoInput {
+    idPromo: ID!
+    cantidad: Int!
+}
 
 
 # -- Mutation -- #
@@ -226,6 +235,7 @@ type Mutation {
     # -- Pedido -- #
     nuevoPedido(input: PedidoInput): Pedido
     actualizarEstadoPedido(id: ID!, estado: String!): Pedido
+    actualizarEstadoVentaPedido(id: ID!, estadoVenta: String!): Pedido
     eliminarPedido(id: ID!): String
 
     # -- Nota de Venta -- #
@@ -236,6 +246,13 @@ type Mutation {
     
     # -- Reporte -- #
     nuevoReporte(input: ReporteInput): Reporte
+    
+    # -- Carrito -- #
+    agregarProductoACarrito(idUsuario: ID!, producto: ProductoEnCarritoInput!): CarritoCompras
+    agregarPromoACarrito(idUsuario: ID!, producto: PromoEnCarritoInput!): CarritoCompras
+    eliminarProductoDeCarrito(idUsuario: ID!, idProducto: ID!): CarritoCompras
+    eliminarPromoDeCarrito(idUsuario: ID!, idPromo: ID!): CarritoCompras
+    vaciarCarrito(idUsuario: ID!): CarritoCompras
 }
 `;
 
