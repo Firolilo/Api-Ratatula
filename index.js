@@ -11,7 +11,22 @@ conectarDB();
 const servidor = new ApolloServer(
     {
         typeDefs,
-        resolvers
+        resolvers,
+        context: ({ req }) => {
+            const token = req.headers['authorization'];
+            if(token)
+            {
+                try{
+                    const usuario = jwt.verify(token, process.env.FIRMA_SECRETA);
+                    return{
+                        usuario
+                    }
+                }catch(e){
+                    console.error(e);
+                    console.error("Token no valido")
+                }
+            }
+        }
     }
 );
 

@@ -8,11 +8,20 @@ const Reporte = require('../models/reporte');
 const Solicitud = require('../models/solicitud');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const {throwIfDisallowedDynamic} = require("next/dist/server/app-render/dynamic-rendering");
 require('dotenv').config({path:'variables.env'});
 
+const crearToken =  (usuario,  palabrasecreta,  expiresIn) => {
+    const {id, correo, rol} = usuario;
+    const waza = jwt.sign ({id, correo, rol}, palabrasecreta, {expiresIn})
+    return waza;
+}
 
 const resolvers = {
     Query: {
+        obtenerUsuario: async (_, {token}) => {
+            return jwt.verify(token, process.env.FIRMA_SECRETA);
+        },
         obtenerUsuarios: async () => {
             try {
                 return await Usuario.find({});
@@ -156,6 +165,17 @@ const resolvers = {
     },
     Mutation: {
         nuevoUsuario: async (_, { input }) => {
+
+            const {email, password} = input;
+
+            const existeUsuario = await Usuario.findOne({correo});
+            if (existeUsuario){
+                throw new Error('Usuario ya existe')
+            }
+
+            const salt = await bcrypt.genSalt(10);
+            input.password = await bcrypt.hash(password, salt);
+
             try {
                 const usuario = new Usuario(input);
                 const nuevoUsuario = await usuario.save();
@@ -185,6 +205,24 @@ const resolvers = {
                 throw new Error(`Error al crear el usuario y su carrito: ${error.message}`);
             }
         },
+
+        autenticarUsuario: async (_, { input }) => {
+            const {correo, password} = input;
+            const existeUsuario = await Usuario.findOne({correo});
+            if (!existeUsuario){
+                throw new Error('Usuario no existe')
+            }
+            const passwordCorrecto = await bcrypt.compare(password, existeUsuario.password);
+            if (!passwordCorrecto)
+            {
+                throw new Error('Password Incorrecto')
+            }
+
+            return{
+                token:crearToken(existeUsuario, process.env.FIRMA_SECRETA, '360000000000000000000000000000000000000000000000000000000000'),
+            }
+        },
+
         actualizarUsuario: async (_, { id, input }) => {
             try {
                 const usuario = await Usuario.findByIdAndUpdate(id, input, { new: true });
@@ -221,19 +259,29 @@ const resolvers = {
             }
         },
 
-        nuevoProducto: async (_, { input }) => {
+        nuevoProducto: async (_, { input }, ctx) => {
             try {
-                const producto = new Producto(input);
-                return await producto.save();
+                // Comprobamos si el rol es 'local' usando el ctx
+                if (ctx.usuario.rol === "local") {
+                    const producto = new Producto(input);
+                    return await producto.save();
+                } else {
+                    throw new Error("Prohibido, solo para Locales");
+                }
             } catch (error) {
                 throw new Error('Error al crear un nuevo producto.');
             }
         },
-        actualizarProducto: async (_, { id, input }) => {
+
+        actualizarProducto: async (_, { id, input }, ctx) => {
             try {
+                // Comprobamos si el rol es 'local' usando el ctx antes de permitir la actualización
+                if (ctx.usuario.rol !== "local") {
+                    throw new Error("Prohibido, solo para Locales");
+                }
+
                 const producto = await Producto.findByIdAndUpdate(id, input, { new: true });
-                if (!producto)
-                {
+                if (!producto) {
                     throw new Error(`Producto con ID ${id} no encontrado.`);
                 }
                 return producto;
@@ -241,11 +289,16 @@ const resolvers = {
                 throw new Error(error.message || 'Error al actualizar el producto.');
             }
         },
-        eliminarProducto: async (_, { id }) => {
+
+        eliminarProducto: async (_, { id }, ctx) => {
             try {
+                // Comprobamos si el rol es 'local' usando el ctx antes de permitir la eliminación
+                if (ctx.usuario.rol !== "local") {
+                    throw new Error("Prohibido, solo para Locales");
+                }
+
                 const producto = await Producto.findById(id);
-                if (!producto)
-                {
+                if (!producto) {
                     throw new Error(`Producto con ID ${id} no encontrado.`);
                 }
                 await Producto.findByIdAndDelete(id);
@@ -255,29 +308,37 @@ const resolvers = {
             }
         },
 
-        nuevaPromocion: async (_, { input }) => {
+
+        nuevaPromocion: async (_, { input }, ctx) => {
             try {
-                const productosIds = input.productos.map((producto) => producto.idProducto);
-                const productosDuplicados = productosIds.filter((id, index) => productosIds.indexOf(id) !== index);
+                // Comprobamos si el rol es 'local' usando el ctx
+                if (ctx.usuario.rol === "local") {
+                    const productosIds = input.productos.map((producto) => producto.idProducto);
+                    const productosDuplicados = productosIds.filter((id, index) => productosIds.indexOf(id) !== index);
 
-                if (productosDuplicados.length > 0) {
-                    throw new Error(
-                        `La promoción contiene productos duplicados. Los IDs duplicados son: ${productosDuplicados.join(", ")}`
-                    );
+                    if (productosDuplicados.length > 0) {
+                        throw new Error("No se pueden agregar productos duplicados a la promoción.");
+                    }
+
+                    const promocion = new Promocion(input);
+                    return await promocion.save();
+                } else {
+                    throw new Error("Prohibido, solo para Locales");
                 }
-
-                const promocion = new Promocion(input);
-                return await promocion.save();
             } catch (error) {
-                console.error("Error al crear promoción:", error.message);
-                throw new Error(`Error al crear una nueva promoción: ${error.message}`);
+                throw new Error('Error al crear una nueva promoción.');
             }
         },
-        eliminarPromocion: async (_, { id }) => {
+
+        eliminarPromocion: async (_, { id }, ctx) => {
             try {
+                // Comprobamos si el rol es 'local' usando el ctx antes de permitir la eliminación
+                if (ctx.usuario.rol !== "local") {
+                    throw new Error("Prohibido, solo para Locales");
+                }
+
                 const promocion = await Promocion.findById(id);
-                if (!promocion)
-                {
+                if (!promocion) {
                     throw new Error(`Promoción con ID ${id} no encontrada.`);
                 }
                 await Promocion.findByIdAndDelete(id);
@@ -287,45 +348,58 @@ const resolvers = {
             }
         },
 
-        nuevoPedido: async (_, { input }) => {
+
+        nuevoPedido: async (_, { input }, ctx) => {
             try {
-                for (const productoPedido of input.productos) {
-                    const producto = await Producto.findById(productoPedido.idProducto);
-                    if (!producto) {
-                        throw new Error(`Producto con ID ${productoPedido.idProducto} no encontrado.`);
+                if(ctx.usuario.rol === "local")
+                {
+                    for (const productoPedido of input.productos) {
+                        const producto = await Producto.findById(productoPedido.idProducto);
+                        if (!producto) {
+                            throw new Error(`Producto con ID ${productoPedido.idProducto} no encontrado.`);
+                        }
+
+                        if (productoPedido.cantidad > producto.stock) {
+                            throw new Error(
+                                `Stock insuficiente para el producto ${producto.nombre}. Disponible: ${producto.stock}, Requerido: ${productoPedido.cantidad}.`
+                            );
+                        }
                     }
 
-                    if (productoPedido.cantidad > producto.stock) {
-                        throw new Error(
-                            `Stock insuficiente para el producto ${producto.nombre}. Disponible: ${producto.stock}, Requerido: ${productoPedido.cantidad}.`
-                        );
+                    const pedido = new Pedido(input);
+                    const nuevoPedido = await pedido.save();
+
+                    for (const productoPedido of input.productos) {
+                        await Producto.findByIdAndUpdate(productoPedido.idProducto, {
+                            $inc: { stock: -productoPedido.cantidad },
+                        });
                     }
+                    return nuevoPedido;
+                }
+                else {
+                    throw new Error("Prohibit, solo para Locales")
                 }
 
-                const pedido = new Pedido(input);
-                const nuevoPedido = await pedido.save();
-
-                for (const productoPedido of input.productos) {
-                    await Producto.findByIdAndUpdate(productoPedido.idProducto, {
-                        $inc: { stock: -productoPedido.cantidad },
-                    });
-                }
-
-                return nuevoPedido;
             } catch (error) {
                 console.error("Error al crear pedido:", error.message);
                 throw new Error(error.message || "Error al crear un nuevo pedido.");
             }
         },
-        actualizarEstadoPedido: async (_, { id, estado }) => {
+        actualizarEstadoPedido: async (_, { id, estado },ctx) => {
             try {
-                const pedido = await Pedido.findById(id);
-                if (!pedido)
+                if(ctx.usuario.rol === "local")
                 {
-                    throw new Error(`Pedido con ID ${id} no encontrado.`);
+                    const pedido = await Pedido.findById(id);
+                    if (!pedido)
+                    {
+                        throw new Error(`Pedido con ID ${id} no encontrado.`);
+                    }
+                    pedido.estado = estado;
+                    return await pedido.save();
                 }
-                pedido.estado = estado;
-                return await pedido.save();
+                else {
+                    throw new Error("Prohibit, solo para Locales")
+                }
             } catch (error) {
                 throw new Error(error.message || 'Error al actualizar el estado del pedido.');
             }
@@ -351,6 +425,7 @@ const resolvers = {
                         );
                     }
                 }
+
                 pedido.estadoVenta = estadoVenta;
                 return await pedido.save();
             } catch (error) {
@@ -358,11 +433,15 @@ const resolvers = {
                 throw new Error(error.message || "Error al actualizar estadoVenta del pedido.");
             }
         },
-        eliminarPedido: async (_, { id }) => {
+        eliminarPedido: async (_, { id }, ctx) => {
             try {
+                // Comprobamos si el rol es 'local' usando el ctx antes de permitir la eliminación
+                if (ctx.usuario.rol !== "local") {
+                    throw new Error("Prohibido, solo para Locales");
+                }
+
                 const pedido = await Pedido.findById(id);
-                if (!pedido)
-                {
+                if (!pedido) {
                     throw new Error(`Pedido con ID ${id} no encontrado.`);
                 }
                 await Pedido.findByIdAndDelete(id);
@@ -401,8 +480,13 @@ const resolvers = {
             }
         },
 
-        nuevoReporte: async (_, { input }) => {
+        nuevoReporte: async (_, { input }, ctx) => {
             try {
+                // Comprobamos si el rol es 'local' usando el ctx antes de permitir la creación del reporte
+                if (ctx.usuario.rol !== "local") {
+                    throw new Error("Prohibido, solo para Locales");
+                }
+
                 const reporte = new Reporte(input);
                 return await reporte.save();
             } catch (error) {

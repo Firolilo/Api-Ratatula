@@ -4,6 +4,8 @@ const typeDefs = gql`
 # -- Query -- #
 type Query {
     # -- Usuario -- #
+    obtenerUsuario(token:String): Usuario
+    
     obtenerUsuarios: [Usuario]
     obtenerUsuarioPorID(id: ID!): Usuario
     
@@ -142,6 +144,10 @@ type Reporte {
     pedidosVendidos: [ID]
 }
 
+type Token {
+    token: String
+}
+
 # -- Inputs -- #
 input UsuarioInput {
     nombre: String!
@@ -215,6 +221,11 @@ input PromoEnCarritoInput {
     cantidad: Int!
 }
 
+input inputAutenticar{
+    correo: String
+    password: String
+}
+
 
 # -- Mutation -- #
 type Mutation {
@@ -222,6 +233,8 @@ type Mutation {
     nuevoUsuario(input: UsuarioInput): Usuario
     actualizarUsuario(id: ID!, input: UsuarioInput): Usuario
     eliminarUsuario(id: ID!): String
+    
+    autenticarUsuario(input: inputAutenticar) : Token
 
     # -- Producto -- #
     nuevoProducto(input: ProductoInput): Producto
