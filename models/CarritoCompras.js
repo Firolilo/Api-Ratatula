@@ -46,6 +46,11 @@ const CarritoComprasSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
+    idLocal: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Usuario",
+        required: false
+    },
 });
 
 module.exports = mongoose.model("CarritoCompras", CarritoComprasSchema);

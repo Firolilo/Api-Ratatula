@@ -8,7 +8,6 @@ const Reporte = require('../models/reporte');
 const Solicitud = require('../models/solicitud');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const {throwIfDisallowedDynamic} = require("next/dist/server/app-render/dynamic-rendering");
 require('dotenv').config({path:'variables.env'});
 
 const crearToken =  (usuario,  palabrasecreta,  expiresIn) => {
@@ -39,6 +38,19 @@ const resolvers = {
                 return usuario;
             } catch (error) {
                 throw new Error(error.message || 'Error al obtener el usuario.');
+            }
+        },
+
+        obtenerLocales: async (_, __, ctx) => {
+            try {
+                if (ctx) {
+                    return await Usuario.find({rol: 'local'});
+                } else {
+                    new Error('Permiso denegado');
+                }
+            } catch (error) {
+                console.error('Error original:', error);
+                throw new Error(`Error al obtener los usuarios. Detalles: ${error.message}`);
             }
         },
 
@@ -166,7 +178,7 @@ const resolvers = {
     Mutation: {
         nuevoUsuario: async (_, { input }) => {
 
-            const {email, password} = input;
+            const {correo, password} = input;
 
             const existeUsuario = await Usuario.findOne({correo});
             if (existeUsuario){
@@ -187,6 +199,7 @@ const resolvers = {
                         promociones: [],
                         total: 0,
                         fechaActualizacion: new Date(),
+                        idLocal: null
                     });
 
                     const nuevoCarrito = await carrito.save();
@@ -311,14 +324,20 @@ const resolvers = {
 
         nuevaPromocion: async (_, { input }, ctx) => {
             try {
-                // Comprobamos si el rol es 'local' usando el ctx
                 if (ctx.usuario.rol === "local") {
                     const productosIds = input.productos.map((producto) => producto.idProducto);
+
                     const productosDuplicados = productosIds.filter((id, index) => productosIds.indexOf(id) !== index);
 
                     if (productosDuplicados.length > 0) {
                         throw new Error("No se pueden agregar productos duplicados a la promoción.");
                     }
+
+                    const productosDB = await Producto.find({ '_id': { $in: productosIds } });
+
+                    input.precioReal = productosDB.reduce((total, producto) => {
+                        return total + producto.precio;
+                    }, 0);
 
                     const promocion = new Promocion(input);
                     return await promocion.save();
@@ -326,7 +345,7 @@ const resolvers = {
                     throw new Error("Prohibido, solo para Locales");
                 }
             } catch (error) {
-                throw new Error('Error al crear una nueva promoción.');
+                throw new Error('Error al crear una nueva promoción: ' + error.message);
             }
         },
 
@@ -495,141 +514,225 @@ const resolvers = {
             }
         },
 
-        agregarProductoACarrito: async (_, { idUsuario, producto }) => {
+        agregarProductoACarrito: async (_, { idUsuario, producto }, ctx) => {
             try {
-                const carrito = await Carrito.findOne({ idUsuario });
+                if (ctx) {
+                    const carrito = await Carrito.findOne({ idUsuario });
 
-                if (!carrito) {
-                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
-                }
+                    if (!carrito) {
+                        throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                    }
 
-                const { idProducto, cantidad } = producto;
+                    const { idProducto, cantidad } = producto;
 
-                const productoDB = await Producto.findById(idProducto);
-                if (!productoDB) {
-                    throw new Error(`Producto con ID ${idProducto} no encontrado`);
-                }
+                    // Buscar el producto en la base de datos
+                    const productoDB = await Producto.findById(idProducto);
+                    if (!productoDB) {
+                        throw new Error(`Producto con ID ${idProducto} no encontrado`);
+                    }
 
-                const productoExistente = carrito.productos.find(p => p.idProducto.toString() === idProducto);
-                const cantidadActual = productoExistente ? productoExistente.cantidad : 0;
+                    if (carrito.promociones.length === 0 && carrito.productos.length === 0 && !carrito.idLocal) {
+                        carrito.idLocal = productoDB.idLocal;
+                    } else {
+                        const waza = productoDB.idLocal.toString();
+                        const wazaCarrito = carrito.idLocal.toString();
+                        if (waza !== wazaCarrito) {
+                            throw new Error(`No se puede añadir el producto al carrito. Solo prodctos de un Local`);
+                        }
+                    }
 
-                if (cantidadActual + cantidad > productoDB.stock) {
-                    throw new Error(
-                        `No se puede añadir el producto al carrito. Stock insuficiente. Stock disponible: ${productoDB.stock}, solicitado: ${cantidadActual + cantidad}`
-                    );
-                }
+                    const productoExistente = carrito.productos.find(p => p.idProducto.toString() === idProducto);
+                    const cantidadActual = productoExistente ? productoExistente.cantidad : 0;
 
-                if (productoExistente) {
-                    productoExistente.cantidad += cantidad;
+                    if (cantidadActual + cantidad > productoDB.stock) {
+                        throw new Error(
+                            `No se puede añadir el producto al carrito. Stock insuficiente. Stock disponible: ${productoDB.stock}, solicitado: ${cantidadActual + cantidad}`
+                        );
+                    }
+
+                    if (productoExistente) {
+                        productoExistente.cantidad += cantidad;
+                    } else {
+                        carrito.productos.push({ idProducto, cantidad });
+                    }
+
+                    carrito.total += productoDB.precio * cantidad;
+                    carrito.fechaActualizacion = new Date();
+
+                    return await carrito.save();
+
                 } else {
-                    carrito.productos.push({ idProducto, cantidad });
+                    // Si el usuario no está autenticado, lanzamos un error
+                    throw new Error(`Prohibido: Necesitas loguearte`);
                 }
-
-                carrito.total += productoDB.precio * cantidad;
-                carrito.fechaActualizacion = new Date();
-
-                return await carrito.save();
             } catch (error) {
+                // Manejo del error
                 throw new Error(`Error al agregar producto al carrito: ${error.message}`);
             }
         },
 
-        agregarPromoACarrito: async (_, { idUsuario, producto }) => {
+        agregarPromoACarrito: async (_, { idUsuario, producto }, ctx) => {
             try {
-                const carrito = await Carrito.findOne({ idUsuario });
+                // Verificar que el usuario esté autenticado
+                if (ctx) {
+                    const carrito = await Carrito.findOne({ idUsuario });
 
-                if (!carrito) {
-                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
-                }
-
-                const { idPromo, cantidad } = producto;
-
-                const promoDB = await Promocion.findById(idPromo);
-                if (!promoDB) {
-                    throw new Error(`Promoción con ID ${idPromo} no encontrada`);
-                }
-
-                const promoExistente = carrito.promociones.find(p => p.idPromo.toString() === idPromo);
-                const cantidadActual = promoExistente ? promoExistente.cantidad : 0;
-
-                for (const productoPromo of promoDB.productos) {
-                    const productoDB = await Producto.findById(productoPromo.idProducto);
-                    const cantidadTotal = (cantidadActual + cantidad) * productoPromo.cantidad;
-
-                    if (productoDB.stock < cantidadTotal) {
-                        throw new Error(
-                            `No se puede añadir la promoción al carrito. Stock insuficiente para el producto ${productoDB.nombre}. ` +
-                            `Stock disponible: ${productoDB.stock}, solicitado: ${cantidadTotal}`
-                        );
+                    if (!carrito) {
+                        throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
                     }
-                }
 
-                if (promoExistente) {
-                    promoExistente.cantidad += cantidad;
+                    const { idPromo, cantidad } = producto;
+
+                    // Buscar la promoción en la base de datos
+                    const promoDB = await Promocion.findById(idPromo);
+                    if (!promoDB) {
+                        throw new Error(`Promoción con ID ${idPromo} no encontrada`);
+                    }
+
+                    if (carrito.promociones.length === 0 && carrito.productos.length === 0 && !carrito.idLocal) {
+                        carrito.idLocal = promoDB.idLocal;
+                    } else {
+                        const waza = promoDB.idLocal.toString();
+                        const wazaCarrito = carrito.idLocal.toString();
+                        if (waza !== wazaCarrito) {
+                            throw new Error(`No se puede añadir el producto al carrito. Solo productos de un Local`);
+                        }
+                    }
+
+                    const promoExistente = carrito.promociones.find(p => p.idPromo.toString() === idPromo);
+                    const cantidadActual = promoExistente ? promoExistente.cantidad : 0;
+
+                    for (const productoPromo of promoDB.productos) {
+                        const productoDB = await Producto.findById(productoPromo.idProducto);
+                        const cantidadTotal = (cantidadActual + cantidad) * productoPromo.cantidad;
+
+                        if (productoDB.stock < cantidadTotal) {
+                            throw new Error(
+                                `No se puede añadir la promoción al carrito. Stock insuficiente para el producto ${productoDB.nombre}. ` +
+                                `Stock disponible: ${productoDB.stock}, solicitado: ${cantidadTotal}`
+                            );
+                        }
+                    }
+
+                    if (promoExistente) {
+                        promoExistente.cantidad += cantidad;
+                    } else {
+                        carrito.promociones.push({ idPromo, cantidad });
+                    }
+
+                    carrito.total += promoDB.precioPromo * cantidad;
+                    carrito.fechaActualizacion = new Date();
+
+                    return await carrito.save();
                 } else {
-                    carrito.promociones.push({ idPromo, cantidad });
+                    throw new Error(`Prohibido: Necesitas loguearte`);
                 }
-
-                carrito.total += promoDB.precioPromo * cantidad;
-                carrito.fechaActualizacion = new Date();
-
-                return await carrito.save();
             } catch (error) {
                 throw new Error(`Error al agregar promoción al carrito: ${error.message}`);
             }
         },
-        eliminarProductoDeCarrito: async (_, { idUsuario, idProducto }) => {
+
+        eliminarProductoDeCarrito: async (_, { idUsuario, idProducto }, ctx) => {
             try {
-                const carrito = await Carrito.findOne({ idUsuario });
+                if (ctx) {
+                    const carrito = await Carrito.findOne({ idUsuario });
 
-                if (!carrito) {
-                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                    if (!carrito) {
+                        throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                    }
+
+                    // Buscar el producto en el carrito
+                    const productoExistente = carrito.productos.find(p => p.idProducto.toString() === idProducto);
+
+                    if (!productoExistente) {
+                        throw new Error(`Producto con ID ${idProducto} no encontrado en el carrito`);
+                    }
+
+                    // Si hay más de 1 unidad del producto, decrementamos la cantidad
+                    if (productoExistente.cantidad > 1) {
+                        productoExistente.cantidad -= 1;
+                    } else {
+                        // Si solo hay una unidad, eliminamos el producto del carrito
+                        carrito.productos = carrito.productos.filter(p => p.idProducto.toString() !== idProducto);
+                    }
+
+                    if (carrito.promociones.length === 0 && carrito.productos.length === 0 && carrito.idLocal) {
+                        carrito.idLocal = null;
+                    }
+
+                    let totalCarrito = 0;
+
+                    for (const producto of carrito.productos) {
+                        const productoDB = await Producto.findById(producto.idProducto);
+                        totalCarrito += productoDB.precio * producto.cantidad;
+                    }
+
+                    for (const promocion of carrito.promociones) {
+                        const promoDB = await Promocion.findById(promocion.idPromo);
+                        totalCarrito += promoDB.precioPromo * promocion.cantidad;
+                    }
+
+                    // Guardar los cambios en la base de datos
+                    return await carrito.save();
+                } else {
+                    throw new Error("Usuario no autenticado");
                 }
-
-                const producto = carrito.productos.find(p => p.idProducto.toString() === idProducto);
-                if (!producto) {
-                    throw new Error(`Producto con ID ${idProducto} no encontrado en el carrito`);
-                }
-
-                const productoDB = await Producto.findById(idProducto);
-                if (productoDB) {
-                    carrito.total -= productoDB.precio * producto.cantidad;
-                }
-
-                carrito.productos = carrito.productos.filter(p => p.idProducto.toString() !== idProducto);
-                carrito.fechaActualizacion = new Date();
-
-                return await carrito.save();
             } catch (error) {
-                throw new Error(`Error al eliminar producto del carrito: ${error.message}`);
+                console.error("Error al eliminar producto del carrito:", error);
+                throw new Error(error.message);
             }
         },
-        eliminarPromoDeCarrito: async (_, { idUsuario, idPromo }) => {
+        eliminarPromoDeCarrito: async (_, { idUsuario, idPromo }, ctx) => {
             try {
-                const carrito = await Carrito.findOne({ idUsuario });
+                if (ctx) {
+                    const carrito = await Carrito.findOne({ idUsuario });
 
-                if (!carrito) {
-                    throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                    if (!carrito) {
+                        throw new Error(`Carrito no encontrado para el usuario con ID ${idUsuario}`);
+                    }
+
+                    // Buscar la promoción en el carrito
+                    const promoExistente = carrito.promociones.find(p => p.idPromo.toString() === idPromo);
+
+                    if (!promoExistente) {
+                        throw new Error(`Promoción con ID ${idPromo} no encontrada en el carrito`);
+                    }
+
+                    if (promoExistente.cantidad > 1) {
+                        promoExistente.cantidad -= 1;
+                    } else {
+                        carrito.promociones = carrito.promociones.filter(p => p.idPromo.toString() !== idPromo);
+                    }
+
+                    if (carrito.promociones.length === 0 && carrito.productos.length === 0 && carrito.idLocal) {
+                        carrito.idLocal = null;
+                    }
+
+                    let totalCarrito = 0;
+
+                    for (const producto of carrito.productos) {
+                        const productoDB = await Producto.findById(producto.idProducto);
+                        totalCarrito += productoDB.precio * producto.cantidad;
+                    }
+
+                    for (const promocion of carrito.promociones) {
+                        const promoDB = await Promocion.findById(promocion.idPromo);
+                        totalCarrito += promoDB.precioPromo * promocion.cantidad;
+                    }
+
+                    carrito.total = totalCarrito;
+
+                    return await carrito.save();
+                } else {
+                    throw new Error("Usuario no autenticado");
                 }
-
-                const promo = carrito.promociones.find(p => p.idPromo.toString() === idPromo);
-                if (!promo) {
-                    throw new Error(`Promoción con ID ${idPromo} no encontrada en el carrito`);
-                }
-
-                const promoDB = await Promocion.findById(idPromo);
-                if (promoDB) {
-                    carrito.total -= promoDB.precioPromo * promo.cantidad;
-                }
-
-                carrito.promociones = carrito.promociones.filter(p => p.idPromo.toString() !== idPromo);
-                carrito.fechaActualizacion = new Date();
-
-                return await carrito.save();
             } catch (error) {
-                throw new Error(`Error al eliminar promoción del carrito: ${error.message}`);
+                console.error("Error al eliminar promoción del carrito:", error);
+                throw new Error(error.message);
             }
         },
+
+
         vaciarCarrito: async (_, { idUsuario }) => {
             try {
                 const carrito = await Carrito.findOne({ idUsuario });
@@ -642,6 +745,7 @@ const resolvers = {
                 carrito.promociones = [];
                 carrito.total = 0;
                 carrito.fechaActualizacion = new Date();
+                carrito.idLocal = null;
 
                 return await carrito.save();
             } catch (error) {

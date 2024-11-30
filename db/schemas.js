@@ -9,6 +9,9 @@ type Query {
     obtenerUsuarios: [Usuario]
     obtenerUsuarioPorID(id: ID!): Usuario
     
+    # -- Locales -- #
+    obtenerLocales: [Usuario]
+    
     # -- Solicitud -- #
     obtenerSolicitudes: [Usuario]
     obtenerSolicitudPorID(id: ID!): Usuario
@@ -89,6 +92,7 @@ type CarritoCompras {
     promociones: [PromocionEnCarrito]
     total: Float
     fechaActualizacion: String
+    idLocal: ID
 }
 
 type ProductoEnCarrito {
@@ -161,6 +165,10 @@ input UsuarioInput {
     horarios: HorariosLocalInput
 }
 
+input UsuarioCorreo{
+    correo: String
+}
+
 input HorariosLocalInput {
     apertura: String!
     cierre: String!
@@ -177,7 +185,6 @@ input ProductoInput {
 input PromocionInput {
     nombre: String!
     descripcion: String
-    precioReal: Float!
     precioPromo: Float!
     productos: [ProductoEnPromocionInput!]!
     idLocal: ID!
@@ -235,6 +242,8 @@ type Mutation {
     eliminarUsuario(id: ID!): String
     
     autenticarUsuario(input: inputAutenticar) : Token
+    
+    # -- Locales -- #
 
     # -- Producto -- #
     nuevoProducto(input: ProductoInput): Producto
