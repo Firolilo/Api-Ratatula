@@ -94,6 +94,16 @@ const resolvers = {
             }
         },
 
+        obtenerProductosLocal: async (_, { idLocal },ctx) => {
+            try {
+                if(ctx) {
+                    return await Producto.find({idLocal: idLocal})
+                }
+            } catch (error) {
+                throw new Error(error.message || 'Error al obtener los productos.');
+            }
+        },
+
         obtenerPromociones: async () => {
             try {
                 return await Promocion.find({});
@@ -111,6 +121,16 @@ const resolvers = {
                 return promocion;
             } catch (error) {
                 throw new Error(error.message || 'Error al obtener la promoción.');
+            }
+        },
+
+        obtenerPromocionesLocal: async (_, { idLocal },ctx) => {
+            try {
+                if(ctx) {
+                    return await Promocion.find({idLocal: idLocal})
+                }
+            } catch (error) {
+                throw new Error(error.message || 'Error al obtener los productos.');
             }
         },
 
@@ -144,6 +164,70 @@ const resolvers = {
                 return pedido;
             } catch (error) {
                 throw new Error(error.message || 'Error al obtener el pedido.');
+            }
+        },
+
+        obtenerPedidosClienteEntregado: async (_, { id }, ctx) => {
+            try {
+                if (ctx) {
+                    console.log(id);
+                    return await Pedido.find({
+                            idCliente: id,
+                            estado: 'entregado'}
+                    );
+                } else {
+                    new Error('Permiso denegado');
+                }
+            } catch (error) {
+                console.error('Error original:', error);
+                throw new Error(`Error al obtener los pedidos. Detalles: ${error.message}`);
+            }
+        },
+        obtenerPedidosClienteNEntregado: async (_, { id }, ctx) => {
+            try {
+                if (ctx) {
+                    return await Pedido.find({
+                        idCliente: id,
+                        estado: { $in: ['preparacion', 'pendiente', 'listo'] },
+                    });
+                } else {
+                    throw new Error('Permiso denegado');
+                }
+            } catch (error) {
+                console.error('Error original:', error);
+                throw new Error(`Error al obtener los pedidos. Detalles: ${error.message}`);
+            }
+        },
+
+        obtenerPedidosLocalCompletado: async (_, { id }, ctx) => {
+            try {
+                if (ctx) {
+                    return await Pedido.find({
+                        idLocal: id,
+                        estadoVenta: 'completado',
+                    });
+                } else {
+                    throw new Error('Permiso denegado');
+                }
+            } catch (error) {
+                console.error('Error original:', error);
+                throw new Error(`Error al obtener los pedidos. Detalles: ${error.message}`);
+            }
+        },
+
+        obtenerPedidosLocalPendiente: async (_, { id }, ctx) => {
+            try {
+                if (ctx) {
+                    return await Pedido.find({
+                        idLocal: id,
+                        estadoVenta: 'pendiente',
+                    });
+                } else {
+                    throw new Error('Permiso denegado');
+                }
+            } catch (error) {
+                console.error('Error original:', error);
+                throw new Error(`Error al obtener los pedidos. Detalles: ${error.message}`);
             }
         },
 
@@ -454,7 +538,6 @@ const resolvers = {
         },
         eliminarPedido: async (_, { id }, ctx) => {
             try {
-                // Comprobamos si el rol es 'local' usando el ctx antes de permitir la eliminación
                 if (ctx.usuario.rol !== "local") {
                     throw new Error("Prohibido, solo para Locales");
                 }
@@ -751,7 +834,81 @@ const resolvers = {
             } catch (error) {
                 throw new Error(`Error al vaciar el carrito: ${error.message}`);
             }
-        }
+        },
+
+        confirmarCarrito: async (_, { idUsuario }, ctx) => {
+            try {
+                if (ctx) {
+                    const carrito = await Carrito.findOne({ idUsuario });
+
+                    for (const productoPedido of carrito.productos) {
+                        const producto = await Producto.findById(productoPedido.idProducto);
+                        if (!producto) {
+                            throw new Error(`Producto con ID ${productoPedido.idProducto} no encontrado.`);
+                        }
+
+                        if (productoPedido.cantidad > producto.stock) {
+                            throw new Error(
+                                `Stock insuficiente para el producto ${producto.nombre}. Disponible: ${producto.stock}, Requerido: ${productoPedido.cantidad}.`
+                            );
+                        }
+                    }
+
+                    for (const promocion of carrito.promociones) {
+                        const promoDB = await Promocion.findById(promocion.idPromo);
+                        if (!promoDB) {
+                            throw new Error(`Promoción con ID ${promocion.idPromo} no encontrada.`);
+                        }
+
+                        for (const productoPromo of promoDB.productos) {
+                            const productoDB = await Producto.findById(productoPromo.idProducto);
+                            const cantidadTotal = promocion.cantidad * productoPromo.cantidad;
+
+                            if (productoDB.stock < cantidadTotal) {
+                                throw new Error(
+                                    `No se puede procesar la promoción ${promoDB.nombre}. Stock insuficiente para el producto ${productoDB.nombre}. ` +
+                                    `Stock disponible: ${productoDB.stock}, solicitado: ${cantidadTotal}`
+                                );
+                            }
+                        }
+                    }
+
+                    const pedido = new Pedido({
+                        idCliente: idUsuario,
+                        idLocal: carrito.idLocal,
+                        productos: carrito.productos,
+                        promociones: carrito.promociones,
+                    });
+
+                    const nuevoPedido = await pedido.save();
+
+                    for (const productoPedido of carrito.productos) {
+                        await Producto.findByIdAndUpdate(productoPedido.idProducto, {
+                            $inc: { stock: -productoPedido.cantidad },
+                        });
+                    }
+
+                    for (const promocion of carrito.promociones) {
+                        const promoDB = await Promocion.findById(promocion.idPromo);
+
+                        for (const productoPromo of promoDB.productos) {
+                            const cantidadTotal = promocion.cantidad * productoPromo.cantidad;
+
+                            await Producto.findByIdAndUpdate(productoPromo.idProducto, {
+                                $inc: { stock: -cantidadTotal },
+                            });
+                        }
+                    }
+
+                    return nuevoPedido;
+                } else {
+                    throw new Error("Prohibido: No autenticado");
+                }
+            } catch (error) {
+                console.error(error.message);
+                throw new Error(`Error al confirmar el carrito: ${error.message}`);
+            }
+        },
     },
 };
 

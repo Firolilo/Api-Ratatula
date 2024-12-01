@@ -19,10 +19,14 @@ type Query {
     # -- Producto -- #
     obtenerProductos: [Producto]
     obtenerProductoPorID(id: ID!): Producto
+    
+    obtenerProductosLocal(idLocal: ID!): [Producto]
 
     # -- Promociones -- #
     obtenerPromociones: [Promocion]
     obtenerPromocionPorID(id: ID!): Promocion
+    
+    obtenerPromocionesLocal(idLocal: ID!): [Promocion]
 
     # -- Carrito -- #
     obtenerCarrito(idUsuario: ID!): CarritoCompras
@@ -30,6 +34,16 @@ type Query {
     # -- Pedido -- #
     obtenerPedidos: [Pedido]
     obtenerPedidoPorID(id: ID!): Pedido
+    
+    #- Cliente
+    
+    obtenerPedidosClienteEntregado(id: ID!): [Pedido]
+    obtenerPedidosClienteNEntregado(id: ID!): [Pedido]
+    
+    #- Local
+
+    obtenerPedidosLocalPendiente(id: ID!): [Pedido]
+    obtenerPedidosLocalCompletado(id: ID!): [Pedido]
 
     # -- Nota de Venta -- #
     obtenerNotasDeVenta: [NotaDeVenta]
@@ -165,10 +179,6 @@ input UsuarioInput {
     horarios: HorariosLocalInput
 }
 
-input UsuarioCorreo{
-    correo: String
-}
-
 input HorariosLocalInput {
     apertura: String!
     cierre: String!
@@ -234,6 +244,7 @@ input inputAutenticar{
 }
 
 
+
 # -- Mutation -- #
 type Mutation {
     # -- Usuario -- #
@@ -275,6 +286,7 @@ type Mutation {
     eliminarProductoDeCarrito(idUsuario: ID!, idProducto: ID!): CarritoCompras
     eliminarPromoDeCarrito(idUsuario: ID!, idPromo: ID!): CarritoCompras
     vaciarCarrito(idUsuario: ID!): CarritoCompras
+    confirmarCarrito(idUsuario: ID!): Pedido
 }
 `;
 

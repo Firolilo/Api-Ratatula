@@ -4,9 +4,15 @@ const conectarDB = require('./config/db');
 const typeDefs = require("./db/schemas");
 const resolvers = require('./db/resolvers');
 
+const verificarPedidosPendientes = require('./utils/verificarPedidos');
+
 const jwt = require("jsonwebtoken");
 
 conectarDB();
+
+setInterval(verificarPedidosPendientes, 5 * 60 * 1000);
+
+verificarPedidosPendientes();
 
 const servidor = new ApolloServer(
     {
@@ -29,7 +35,6 @@ const servidor = new ApolloServer(
         }
     }
 );
-
 
 servidor.listen().then(({url}) => {
     console.log(`Base de datos conectada en la URL: ${url}`)

@@ -97,4 +97,4 @@ PedidoSchema.pre("save", async function (next) {
     }
 });
 
-module.exports = mongoose.model("Pedido", PedidoSchema);
+module.exports = mongoose.models.Pedido || mongoose.model('Pedido', PedidoSchema);
