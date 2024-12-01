@@ -64,6 +64,9 @@ const PedidoSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
+    urlqr: {
+        type: String
+    }
 });
 
 PedidoSchema.pre("save", async function (next) {

@@ -8,6 +8,10 @@ const Reporte = require('../models/reporte');
 const Solicitud = require('../models/solicitud');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const mime = require('mime-types');
+const sharp = require('sharp');
+const {c} = require("react/compiler-runtime");
 require('dotenv').config({path:'variables.env'});
 
 const crearToken =  (usuario,  palabrasecreta,  expiresIn) => {
@@ -15,6 +19,27 @@ const crearToken =  (usuario,  palabrasecreta,  expiresIn) => {
     const waza = jwt.sign ({id, correo, rol}, palabrasecreta, {expiresIn})
     return waza;
 }
+
+const convertirImagenABase64 = async (rutaImagen, opciones = { width: null, quality: 80 }) => {
+    try {
+        const mimeType = mime.lookup(rutaImagen);
+
+        if (!mimeType) {
+            throw new Error('No se pudo determinar el tipo de la imagen.');
+        }
+
+        const buffer = await sharp(rutaImagen)
+            .resize(opciones.width ? { width: opciones.width, height: opciones.width} : null)
+            .jpeg({ quality: opciones.quality })
+            .toBuffer();
+
+        const imagenBase64 = buffer.toString('base64');
+        return `data:${mimeType};base64,${imagenBase64}`;
+    } catch (error) {
+        console.error("Error al convertir la imagen a Base64:", error.message);
+        return null;
+    }
+};
 
 const resolvers = {
     Query: {
@@ -358,8 +383,17 @@ const resolvers = {
 
         nuevoProducto: async (_, { input }, ctx) => {
             try {
-                // Comprobamos si el rol es 'local' usando el ctx
                 if (ctx.usuario.rol === "local") {
+                    if(input.imagen)
+                    {
+                        const imagen64 = await convertirImagenABase64(input.imagen, { width: 500, quality: 75 });
+                        if(!imagen64)
+                        {
+                            throw new Error("La imagen proporcionada no es válida.");
+                        }
+                        input.imagen = imagen64;
+                    }
+
                     const producto = new Producto(input);
                     return await producto.save();
                 } else {
@@ -422,6 +456,17 @@ const resolvers = {
                     input.precioReal = productosDB.reduce((total, producto) => {
                         return total + producto.precio;
                     }, 0);
+
+                    if(input.imagen)
+                    {
+                        const imagen64 = await convertirImagenABase64(input.imagen, { width: 500, quality: 75 });
+                        if(!imagen64)
+                        {
+                            throw new Error("La imagen proporcionada no es válida.");
+                        }
+                        input.imagen = imagen64;
+                    }
+
 
                     const promocion = new Promocion(input);
                     return await promocion.save();
@@ -536,6 +581,24 @@ const resolvers = {
                 throw new Error(error.message || "Error al actualizar estadoVenta del pedido.");
             }
         },
+        actualizarTiempoPedido: async (_, { id, tiempoPreparacion }, ctx) => {
+            try {
+                if(ctx !== "local")
+                {
+                    throw new Error("Prohibido, solo para Locales")
+                }
+                const pedido = await Pedido.findById(id);
+                if (!pedido)
+                {
+                    throw new Error(`Pedido con ID ${id} no encontrado.`);
+                }
+                pedido.tiempoPreparacion = tiempoPreparacion;
+                return await pedido.save();
+            } catch (error){
+                console.error("Error al actualizar tiempo del pedido:", error.message);
+                throw new Error(error.message || "Error al actualizar tiempo del pedido");
+            }
+        },
         eliminarPedido: async (_, { id }, ctx) => {
             try {
                 if (ctx.usuario.rol !== "local") {
@@ -552,6 +615,7 @@ const resolvers = {
                 throw new Error(error.message || 'Error al eliminar el pedido.');
             }
         },
+
 
         nuevaNotaDeVenta: async (_, { input }) => {
             try {

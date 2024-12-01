@@ -79,7 +79,6 @@ type Producto {
     descripcion: String
     precio: Float
     stock: Int
-    tiempoPreparacion: Int
     idLocal: ID
 }
 
@@ -130,6 +129,7 @@ type Pedido {
     estadoVenta: String
     total: Float
     fechaCreacion: String
+    urlqr: String
 }
 
 type ProductoEnPedido {
@@ -189,7 +189,8 @@ input ProductoInput {
     descripcion: String
     precio: Float!
     stock: Int!
-    idLocal: ID
+    idLocal: ID!
+    imagen: String
 }
 
 input PromocionInput {
@@ -198,6 +199,7 @@ input PromocionInput {
     precioPromo: Float!
     productos: [ProductoEnPromocionInput!]!
     idLocal: ID!
+    imagen: String
 }
 
 input ProductoEnPromocionInput {
@@ -210,6 +212,7 @@ input PedidoInput {
     idLocal: ID!
     productos: [ProductoEnPedidoInput!]!
     estadoVenta: String
+    urlqr: String
 }
 
 input ProductoEnPedidoInput {
@@ -270,6 +273,8 @@ type Mutation {
     actualizarEstadoPedido(id: ID!, estado: String!): Pedido
     actualizarEstadoVentaPedido(id: ID!, estadoVenta: String!): Pedido
     eliminarPedido(id: ID!): String
+    
+    actualizarTiempoPedido(id: ID!, tiempoPreparacion: Int!): Pedido
 
     # -- Nota de Venta -- #
     nuevaNotaDeVenta(input: NotaDeVentaInput): NotaDeVenta
