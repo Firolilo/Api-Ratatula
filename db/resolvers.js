@@ -11,6 +11,7 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const mime = require('mime-types');
 const sharp = require('sharp');
+const axios = require("axios");
 const {c} = require("react/compiler-runtime");
 require('dotenv').config({path:'variables.env'});
 
@@ -499,8 +500,7 @@ const resolvers = {
 
         nuevoPedido: async (_, { input }, ctx) => {
             try {
-                if(ctx.usuario.rol === "local")
-                {
+                if (ctx) {
                     for (const productoPedido of input.productos) {
                         const producto = await Producto.findById(productoPedido.idProducto);
                         if (!producto) {
@@ -517,17 +517,64 @@ const resolvers = {
                     const pedido = new Pedido(input);
                     const nuevoPedido = await pedido.save();
 
+                    if (input.qr) {
+                        const productosDescripcion = input.productos.map((producto) => ({
+                            concepto: "Pedido Ratatula",
+                            cantidad: 1,
+                            costo_unitario: nuevoPedido.total,
+                        }));
+
+                        const deudaRequest = {
+                            appkey: "11bb10ce-68ba-4af1-8eb7-4e6624fed729",
+                            email_cliente: ctx.usuario.correo,
+                            identificador: nuevoPedido._id.toString(),
+                            descripcion: `Pedido ${nuevoPedido._id}`,
+                            nombre_cliente: ctx.usuario.nombre,
+                            apellido_cliente: ctx.usuario.apellido,
+                            fecha_vencimiento: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutos de vencimiento
+                            lineas_detalle_deuda: productosDescripcion,
+                        };
+
+                        console.log(nuevoPedido._id.toString());
+
+                        try {
+                            const response = await axios.post(
+                                "https://api.libelula.bo/rest/deuda/registrar",
+                                deudaRequest,
+                                {
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                    },
+                                }
+                            );
+
+                            const { id_transaccion, qr_simple_url } = response.data;
+                            console.log(response.data);
+
+                            if (qr_simple_url) {
+                                await Pedido.findByIdAndUpdate(nuevoPedido._id, {
+                                    urlqr: qr_simple_url,
+                                    transaccionID: id_transaccion,
+                                });
+                            } else {
+                                throw new Error("No se generó el QR Simple URL.");
+                            }
+                        } catch (error) {
+                            console.error("Error al registrar deuda en Libélula:", error.response?.data || error.message);
+                            throw new Error("No se pudo registrar la deuda en la pasarela de pagos.");
+                        }
+                    }
+
                     for (const productoPedido of input.productos) {
                         await Producto.findByIdAndUpdate(productoPedido.idProducto, {
                             $inc: { stock: -productoPedido.cantidad },
                         });
                     }
-                    return nuevoPedido;
-                }
-                else {
-                    throw new Error("Prohibit, solo para Locales")
-                }
 
+                    return nuevoPedido;
+                } else {
+                    throw new Error("Prohibido, solo para Locales");
+                }
             } catch (error) {
                 console.error("Error al crear pedido:", error.message);
                 throw new Error(error.message || "Error al crear un nuevo pedido.");
@@ -583,7 +630,7 @@ const resolvers = {
         },
         actualizarTiempoPedido: async (_, { id, tiempoPreparacion }, ctx) => {
             try {
-                if(ctx !== "local")
+                if(ctx.usuario.rol !== "local")
                 {
                     throw new Error("Prohibido, solo para Locales")
                 }
@@ -601,8 +648,8 @@ const resolvers = {
         },
         eliminarPedido: async (_, { id }, ctx) => {
             try {
-                if (ctx.usuario.rol !== "local") {
-                    throw new Error("Prohibido, solo para Locales");
+                if (!ctx) {
+                    throw new Error("Prohibido, necesitas estar Logueado");
                 }
 
                 const pedido = await Pedido.findById(id);
@@ -633,6 +680,35 @@ const resolvers = {
                 if (input.montoPagado) {
                     nota.cambio = input.montoPagado - nota.montoTotal;
                 }
+
+                const nuevaNota = await nota.save();
+
+                pedido.estadoVenta = "completado";
+                await pedido.save();
+
+                return nuevaNota;
+            } catch (error) {
+                console.error("Error al crear nota de venta y actualizar estado del pedido:", error.message);
+                throw new Error(`Error al registrar una nueva nota de venta: ${error.message}`);
+            }
+        },
+
+        nuevaNotaDeVentaQR: async (_, { transaction_id }) => {
+            try {
+
+                const pedido = await Pedido.find({transaccionID: transaction_id});
+                if (!pedido) {
+                    throw new Error(`Pedido con transaccionID ${input.idPedido} no encontrado.`);
+                }
+
+                const nota = new NotaDeVenta(
+                    {
+                        idPedido: pedido._id.toString(),
+                        metodo: "QR",
+                        montoTotal: pedido.total,
+                        montoPagado: pedido.total
+                    }
+                );
 
                 const nuevaNota = await nota.save();
 

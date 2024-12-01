@@ -130,6 +130,8 @@ type Pedido {
     total: Float
     fechaCreacion: String
     urlqr: String
+    qr: Boolean
+    transaccionID: String
 }
 
 type ProductoEnPedido {
@@ -211,8 +213,7 @@ input PedidoInput {
     idCliente: ID!
     idLocal: ID!
     productos: [ProductoEnPedidoInput!]!
-    estadoVenta: String
-    urlqr: String
+    qr: Boolean
 }
 
 input ProductoEnPedidoInput {
@@ -278,6 +279,8 @@ type Mutation {
 
     # -- Nota de Venta -- #
     nuevaNotaDeVenta(input: NotaDeVentaInput): NotaDeVenta
+    
+    nuevaNotaDeVentaQR(transaction_id: String): NotaDeVenta
     
     # -- Solicitud -- #
     nuevaSolicitud(input: UsuarioInput): Usuario

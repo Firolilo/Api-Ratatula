@@ -64,8 +64,16 @@ const PedidoSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
+    qr:{
+        type: Boolean,
+        required: true
+    },
     urlqr: {
         type: String
+    },
+    transaccionID:{
+        type: String,
+        default: "Juan"
     }
 });
 
@@ -99,5 +107,5 @@ PedidoSchema.pre("save", async function (next) {
         next(error);
     }
 });
-
-module.exports = mongoose.models.Pedido || mongoose.model('Pedido', PedidoSchema);
+// mongoose.models.Pedido ||
+module.exports = mongoose.model('Pedido', PedidoSchema);
