@@ -15,9 +15,25 @@ const axios = require("axios");
 const {c} = require("react/compiler-runtime");
 require('dotenv').config({path:'variables.env'});
 
-const crearToken =  (usuario,  palabrasecreta,  expiresIn) => {
-    const {id, correo, rol} = usuario;
-    const waza = jwt.sign ({id, correo, rol}, palabrasecreta, {expiresIn})
+const crearToken = (usuario, palabrasecreta, expiresIn) => {
+    const waza = jwt.sign(
+        {
+            id: usuario.id,
+            nombre: usuario.nombre,
+            apellido: usuario.apellido,
+            correo: usuario.correo,
+            rol: usuario.rol,
+            estado: usuario.estado,
+            telefono: usuario.telefono,
+            fechaRegistro: usuario.fechaRegistro,
+            descripcion: usuario.descripcion,
+            categoria: usuario.categoria,
+            horarios: usuario.horarios,
+            idCarrito: usuario.idCarrito,
+        },
+        palabrasecreta,
+        { expiresIn }
+    );
     return waza;
 }
 
@@ -401,7 +417,8 @@ const resolvers = {
                     throw new Error("Prohibido, solo para Locales");
                 }
             } catch (error) {
-                throw new Error('Error al crear un nuevo producto.');
+                console.error('Error al crear un nuevo producto:', error.message);
+                throw new Error(`Error al crear un nuevo producto: ${error.message}`);
             }
         },
 

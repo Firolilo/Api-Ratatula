@@ -2,12 +2,6 @@ const fetch = require("node-fetch");
 
 const libelulaCallback = async (req, res) => {
     try {
-        // Registrar la llamada entrante de Libélula
-        console.log("Nueva llamada de Libélula:");
-        console.log("Headers:", req.headers); // Cabeceras de la solicitud
-        console.log("Query Params:", req.query); // Parámetros de la URL
-        console.log("Body:", req.body); // Cuerpo de la solicitud (si aplica)
-
         const { transaction_id } = req.query;
 
         if (!transaction_id) {

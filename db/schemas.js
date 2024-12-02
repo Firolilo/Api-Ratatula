@@ -63,6 +63,7 @@ type Usuario {
     estado: String
     telefono: String
     fechaRegistro: String
+    idCarrito: String
     descripcion: String
     categoria: [String]
     horarios: Horarios
