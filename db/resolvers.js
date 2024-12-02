@@ -533,6 +533,7 @@ const resolvers = {
                             apellido_cliente: ctx.usuario.apellido,
                             fecha_vencimiento: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutos de vencimiento
                             lineas_detalle_deuda: productosDescripcion,
+                            callback_url: `http://34.16.100.239:4000/api/pago-exitoso`,
                         };
 
                         console.log(nuevoPedido._id.toString());
@@ -573,7 +574,7 @@ const resolvers = {
 
                     return nuevoPedido;
                 } else {
-                    throw new Error("Prohibido, solo para Locales");
+                    throw new Error("Prohibido, necesita autenticación");
                 }
             } catch (error) {
                 console.error("Error al crear pedido:", error.message);
@@ -1039,6 +1040,12 @@ const resolvers = {
                             });
                         }
                     }
+
+                    carrito.productos = [];
+                    carrito.promociones = [];
+                    carrito.total = 0;
+                    carrito.fechaActualizacion = new Date();
+                    carrito.idLocal = null;
 
                     return nuevoPedido;
                 } else {
