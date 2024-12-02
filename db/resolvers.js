@@ -198,8 +198,8 @@ const resolvers = {
                 if (ctx) {
                     console.log(id);
                     return await Pedido.find({
-                            idCliente: id,
-                            estado: 'entregado'}
+                        idCliente: id,
+                        estado: 'entregado'}
                     );
                 } else {
                     new Error('Permiso denegado');
@@ -697,7 +697,7 @@ const resolvers = {
         nuevaNotaDeVentaQR: async (_, { transaction_id }) => {
             try {
 
-                const pedido = await Pedido.find({transaccionID: transaction_id});
+                const pedido = await Pedido.findById(transaction_id);
                 if (!pedido) {
                     throw new Error(`Pedido con transaccionID ${input.idPedido} no encontrado.`);
                 }
@@ -977,11 +977,16 @@ const resolvers = {
             }
         },
 
-        confirmarCarrito: async (_, { idUsuario }, ctx) => {
+        confirmarCarrito: async (_, { idUsuario, qr }, ctx) => {
             try {
                 if (ctx) {
                     const carrito = await Carrito.findOne({ idUsuario });
 
+                    if (!carrito || (carrito.productos.length === 0 && carrito.promociones.length === 0)) {
+                        throw new Error("El carrito está vacío o no existe.");
+                    }
+
+                    // Validar productos en el carrito
                     for (const productoPedido of carrito.productos) {
                         const producto = await Producto.findById(productoPedido.idProducto);
                         if (!producto) {
@@ -995,6 +1000,7 @@ const resolvers = {
                         }
                     }
 
+                    // Validar promociones en el carrito
                     for (const promocion of carrito.promociones) {
                         const promoDB = await Promocion.findById(promocion.idPromo);
                         if (!promoDB) {
@@ -1014,21 +1020,25 @@ const resolvers = {
                         }
                     }
 
+                    // Crear el pedido
                     const pedido = new Pedido({
                         idCliente: idUsuario,
                         idLocal: carrito.idLocal,
                         productos: carrito.productos,
                         promociones: carrito.promociones,
+                        qr: qr,
                     });
 
                     const nuevoPedido = await pedido.save();
 
+                    // Actualizar stock de productos
                     for (const productoPedido of carrito.productos) {
                         await Producto.findByIdAndUpdate(productoPedido.idProducto, {
                             $inc: { stock: -productoPedido.cantidad },
                         });
                     }
 
+                    // Actualizar stock de productos en promociones
                     for (const promocion of carrito.promociones) {
                         const promoDB = await Promocion.findById(promocion.idPromo);
 
@@ -1041,11 +1051,61 @@ const resolvers = {
                         }
                     }
 
+                    // Registrar deuda en Libélula si es QR
+                    if (qr) {
+                        const productosDescripcion = [
+                            {
+                                concepto: "Pedido Ratatula", // Descripción general del pedido
+                                cantidad: 1, // Siempre 1, ya que representa el pedido completo
+                                costo_unitario: nuevoPedido.total, // Total del pedido
+                            },
+                        ];
+
+                        const deudaRequest = {
+                            appkey: "11bb10ce-68ba-4af1-8eb7-4e6624fed729",
+                            email_cliente: ctx.usuario.correo,
+                            identificador: nuevoPedido._id.toString(),
+                            descripcion: `Pedido ${nuevoPedido._id}`,
+                            nombre_cliente: ctx.usuario.nombre,
+                            apellido_cliente: ctx.usuario.apellido,
+                            fecha_vencimiento: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutos de vencimiento
+                            lineas_detalle_deuda: productosDescripcion,
+                            callback_url: `http://34.16.100.239:4000/api/pago-exitoso`,
+                        };
+
+                        try {
+                            const response = await axios.post(
+                                "https://api.libelula.bo/rest/deuda/registrar",
+                                deudaRequest,
+                                {
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                    },
+                                }
+                            );
+
+                            const { id_transaccion, qr_simple_url } = response.data;
+
+                            if (qr_simple_url) {
+                                await Pedido.findByIdAndUpdate(nuevoPedido._id, {
+                                    urlqr: qr_simple_url,
+                                    transaccionID: id_transaccion,
+                                });
+                            } else {
+                                throw new Error("No se generó el QR Simple URL.");
+                            }
+                        } catch (error) {
+                            console.error("Error al registrar deuda en Libélula:", error.response?.data || error.message);
+                            throw new Error("No se pudo registrar la deuda en la pasarela de pagos.");
+                        }
+                    }
+
                     carrito.productos = [];
                     carrito.promociones = [];
                     carrito.total = 0;
                     carrito.fechaActualizacion = new Date();
                     carrito.idLocal = null;
+                    await carrito.save();
 
                     return nuevoPedido;
                 } else {

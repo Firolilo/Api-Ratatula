@@ -294,7 +294,7 @@ type Mutation {
     eliminarProductoDeCarrito(idUsuario: ID!, idProducto: ID!): CarritoCompras
     eliminarPromoDeCarrito(idUsuario: ID!, idPromo: ID!): CarritoCompras
     vaciarCarrito(idUsuario: ID!): CarritoCompras
-    confirmarCarrito(idUsuario: ID!): Pedido
+    confirmarCarrito(idUsuario: ID!, qr: Boolean!): Pedido
 }
 `;
 

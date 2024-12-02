@@ -2,18 +2,28 @@ const fetch = require("node-fetch");
 
 const libelulaCallback = async (req, res) => {
     try {
+        // Registrar la llamada entrante de Libélula
+        console.log("Nueva llamada de Libélula:");
+        console.log("Headers:", req.headers); // Cabeceras de la solicitud
+        console.log("Query Params:", req.query); // Parámetros de la URL
+        console.log("Body:", req.body); // Cuerpo de la solicitud (si aplica)
+
         const { transaction_id } = req.query;
 
         if (!transaction_id) {
+            console.error("Falta el parámetro transaction_id en la solicitud.");
             return res.status(400).json({ error: "transaction_id es requerido." });
         }
 
         const endpointGraphQL = "http://localhost:4000/graphql";
         const query = `
             mutation {
-                nuevaNotaDeVentaQR(input: { transaction_id: "${transaction_id}" }) {
+                nuevaNotaDeVentaQR(transaction_id: "${transaction_id}") {
                     id
-                    estado
+                    idPedido
+                    metodo
+                    montoTotal
+                    fechaPago
                 }
             }
         `;
